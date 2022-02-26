@@ -4,6 +4,7 @@ go 1.17
 
 require (
 	github.com/google/uuid v1.3.0
+	github.com/matoous/go-nanoid/v2 v2.0.0
 	github.com/stretchr/testify v1.7.0
 	gorm.io/driver/postgres v1.3.1
 	gorm.io/gorm v1.23.1

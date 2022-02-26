@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	gonanoid "github.com/matoous/go-nanoid/v2"
 )
 
 type Params struct {
@@ -36,14 +38,16 @@ var operators = map[string]string{
 	"_has_keys_all": "?&",
 }
 
-func traverse(parent string, where *map[string]interface{}, arguments *map[string]interface{}, counter *int) (expression string, err error) {
+func traverse(parent string, where *map[string]interface{}, arguments *map[string]interface{}) (expression string, err error) {
 	columns := []string{}
 	for k, v := range *where {
 		switch k {
 		case "_eq":
 			fallthrough
 		case "_neq":
-			key := fmt.Sprint(parent, "_", *counter)
+			var id string
+			id, err = gonanoid.Generate("1234567890abcdef", 8)
+			key := fmt.Sprint(parent, "_", id)
 			columns = append(columns, fmt.Sprint(`"`, parent, `"`, " ", operators[k], " @", key))
 			(*arguments)[key] = v
 		default:
@@ -52,8 +56,7 @@ func traverse(parent string, where *map[string]interface{}, arguments *map[strin
 				err = errors.New("not valid object")
 				return
 			}
-			*counter++
-			expression, err = traverse(k, &x, arguments, counter)
+			expression, err = traverse(k, &x, arguments)
 			return
 		}
 	}
@@ -158,8 +161,7 @@ func Parse(input *[]byte) (params *Params, err error) {
 		}
 		var expression string
 		arguments := map[string]interface{}{}
-		counter := 0
-		expression, err = traverse("", &where, &arguments, &counter)
+		expression, err = traverse("", &where, &arguments)
 		if err != nil {
 			return
 		}
