@@ -1,6 +1,9 @@
-package rql
+package tableql
 
 import (
+	"database/sql"
+	"log"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -10,15 +13,17 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"gorm.io/gorm/logger"
 	"gorm.io/gorm/schema"
 )
 
 type Table struct {
-	ID     uuid.UUID `json:"uuid"`
-	Int    int       `json:"Int"`
-	String string    `json:"string"`
-	Bool   bool      `json:"bool"`
-	Time   time.Time `json:"time"`
+	ID     uuid.UUID      `json:"uuid"`
+	Int    int            `json:"Int"`
+	String string         `json:"string"`
+	Bool   bool           `json:"bool"`
+	Time   time.Time      `json:"time"`
+	Null   sql.NullString `json:"null"`
 }
 
 var client *gorm.DB
@@ -58,6 +63,13 @@ func Test(t *testing.T) {
 	var err error
 	dsn := "host=127.0.0.1 user=postgres password=R00Tpostgres dbname=tableql port=5432 sslmode=disable"
 	client, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
+		Logger: logger.New(log.New(os.Stdout, "\r\n", log.LstdFlags),
+			logger.Config{
+				SlowThreshold:             100 * time.Millisecond,
+				LogLevel:                  logger.Warn,
+				IgnoreRecordNotFoundError: false,
+				Colorful:                  false,
+			}),
 		NamingStrategy: schema.NamingStrategy{
 			SingularTable: true,
 		},
@@ -76,6 +88,10 @@ func Test(t *testing.T) {
 			String: "string1",
 			Bool:   true,
 			Time:   time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC),
+			Null: sql.NullString{
+				String: "not null",
+				Valid:  true,
+			},
 		},
 		{
 			ID:     uuid.MustParse("44e9e7b7-e74d-476d-bdae-f47502790a44"),
@@ -83,6 +99,9 @@ func Test(t *testing.T) {
 			String: "string2",
 			Bool:   false,
 			Time:   time.Date(2020, time.January, 2, 0, 0, 0, 0, time.UTC),
+			Null: sql.NullString{
+				Valid: false,
+			},
 		},
 		{
 			ID:     uuid.MustParse("094d82cf-d197-4fbb-b6dd-85acdd0191b2"),
@@ -90,6 +109,10 @@ func Test(t *testing.T) {
 			String: "string3",
 			Bool:   true,
 			Time:   time.Date(2020, time.January, 3, 0, 0, 0, 0, time.UTC),
+			Null: sql.NullString{
+				String: "not null",
+				Valid:  true,
+			},
 		},
 	}
 	err = client.Clauses(clause.OnConflict{UpdateAll: true}).Create(&data).Error
@@ -143,8 +166,89 @@ func Test(t *testing.T) {
 			{"id": "44e9e7b7-e74d-476d-bdae-f47502790a44"},
 		}, data)
 	})
-	t.Run("where eq", func(t *testing.T) {
+	t.Run("where neq", func(t *testing.T) {
 		var input = `{ "select": [ "id" ], "where": { "int": { "_neq": 2 } } }`
+		var data []map[string]interface{}
+		err := query(&input, &data)
+		if err != nil {
+			t.Error(err)
+		}
+		assert.Equal(t, []map[string]interface{}{
+			{"id": "1b019d23-562e-440a-9088-23697ae41979"},
+			{"id": "094d82cf-d197-4fbb-b6dd-85acdd0191b2"},
+		}, data)
+	})
+	t.Run("where in", func(t *testing.T) {
+		var input = `{ "select": [ "id" ], "where": { "int": { "_in": [ 2, 3 ] } } }`
+		var data []map[string]interface{}
+		err := query(&input, &data)
+		if err != nil {
+			t.Error(err)
+		}
+		assert.Equal(t, []map[string]interface{}{
+			{"id": "44e9e7b7-e74d-476d-bdae-f47502790a44"},
+			{"id": "094d82cf-d197-4fbb-b6dd-85acdd0191b2"},
+		}, data)
+	})
+	t.Run("where nin", func(t *testing.T) {
+		var input = `{ "select": [ "id" ], "where": { "int": { "_nin": [ 2, 3 ] } } }`
+		var data []map[string]interface{}
+		err := query(&input, &data)
+		if err != nil {
+			t.Error(err)
+		}
+		assert.Equal(t, []map[string]interface{}{
+			{"id": "1b019d23-562e-440a-9088-23697ae41979"},
+		}, data)
+	})
+	t.Run("where is null", func(t *testing.T) {
+		var input = `{ "select": [ "id" ], "where": { "null": { "_is_null": true } } }`
+		var data []map[string]interface{}
+		err := query(&input, &data)
+		if err != nil {
+			t.Error(err)
+		}
+		assert.Equal(t, []map[string]interface{}{
+			{"id": "44e9e7b7-e74d-476d-bdae-f47502790a44"},
+		}, data)
+	})
+	t.Run("where is not null", func(t *testing.T) {
+		var input = `{ "select": [ "id" ], "where": { "null": { "_is_null": false } } }`
+		var data []map[string]interface{}
+		err := query(&input, &data)
+		if err != nil {
+			t.Error(err)
+		}
+		assert.Equal(t, []map[string]interface{}{
+			{"id": "1b019d23-562e-440a-9088-23697ae41979"},
+			{"id": "094d82cf-d197-4fbb-b6dd-85acdd0191b2"},
+		}, data)
+	})
+	t.Run("where and", func(t *testing.T) {
+		var input = `{ "select": [ "id" ], "where": { "_and": [ { "null": { "_is_null": false } }, { "int": { "_eq": 1 } } ] } }`
+		var data []map[string]interface{}
+		err := query(&input, &data)
+		if err != nil {
+			t.Error(err)
+		}
+		assert.Equal(t, []map[string]interface{}{
+			{"id": "1b019d23-562e-440a-9088-23697ae41979"},
+		}, data)
+	})
+	t.Run("where or", func(t *testing.T) {
+		var input = `{ "select": [ "id" ], "where": { "_or": [ { "int": { "_eq": 1 } }, { "int": { "_eq": 3 } } ] } }`
+		var data []map[string]interface{}
+		err := query(&input, &data)
+		if err != nil {
+			t.Error(err)
+		}
+		assert.Equal(t, []map[string]interface{}{
+			{"id": "1b019d23-562e-440a-9088-23697ae41979"},
+			{"id": "094d82cf-d197-4fbb-b6dd-85acdd0191b2"},
+		}, data)
+	})
+	t.Run("where not", func(t *testing.T) {
+		var input = `{ "select": [ "id" ], "where": { "_not": { "int": { "_eq": 2 } } } }`
 		var data []map[string]interface{}
 		err := query(&input, &data)
 		if err != nil {
