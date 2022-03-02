@@ -1,4 +1,4 @@
-module github.com/disyam/tableql
+module github.com/hash-id/tableql
 
 go 1.17
 
